@@ -25,14 +25,14 @@ Requisitos: Conda o Miniconda. Extrae el ZIP y **abre la terminal dentro de la c
 que contiene `app.py`** (no dentro de `models` ni `src`).
 
 ```powershell
-conda create -n purepremium_cloud python=3.11 pip -y
+conda create -n purepremium_cloud python=3.13 pip -y
 conda activate purepremium_cloud
 python --version
 python -m pip install -r requirements.txt
 python -m pip check
 ```
 
-La versión de Python deberá ser **3.11.x**. Los modelos contienen artefactos
+La versión de Python deberá ser **3.13.x**. Los modelos contienen artefactos
 serializados con las versiones exactas de NumPy, pandas, sklearn, XGBoost,
 joblib, statsmodels y TensorFlow indicadas en `requirements.txt`.
 
@@ -50,8 +50,6 @@ python -m streamlit run app.py
   contra sus predicciones guardadas (15 verificaciones). Es obligatorio para
   dar por verificada la inferencia completa, pero no requiere el dataset original.
 - En Streamlit, comprueba las cuatro secciones y cotiza un perfil en el formulario.
-- No asumimos que una prueba satisfactoria en Python 3.13 o sin TensorFlow equivalga
-  a un smoke test en Python 3.11 con todas las dependencias.
 
 Para salir del entorno: `conda deactivate`.
 
@@ -62,7 +60,7 @@ Para salir del entorno: `conda deactivate`.
    `app.py` y `requirements.txt` deben quedar en la raíz del repositorio.
 3. En [share.streamlit.io](https://share.streamlit.io/), crea una app desde ese repositorio.
 4. Selecciona la rama y **Main file path: `app.py`**.
-5. En **Advanced settings**, selecciona **Python 3.11** antes de desplegar.
+5. En **Advanced settings**, selecciona **Python 3.13** antes de desplegar.
 6. Despliega y revisa los logs. Verifica la cotización de las tres estrategias
    y el dashboard; el arranque/carga de TensorFlow puede consumir memoria.
 

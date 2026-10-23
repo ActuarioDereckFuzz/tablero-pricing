@@ -1,14 +1,29 @@
 # Entornos locales y cachés
-.venv/
-venv/
-env/
+.ipynb_checkpoints/
+
+
+# Python
 __pycache__/
 *.py[cod]
 .pytest_cache/
-.ipynb_checkpoints/
-.streamlit/secrets.toml
+
+# Local environments
+.venv/
+venv/
+env/
+.conda/
+
+# Local settings and secrets
 .env
 .env.*
-*.log
+!.env.example
+.streamlit/secrets.toml
+
+# Editor and OS files
+.vscode/
+.idea/
 .DS_Store
 Thumbs.db
+
+# Local logs
+*.log
