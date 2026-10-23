@@ -1,0 +1,22 @@
+# PurePremium Lab — entorno de despliegue (CPU, Python 3.11.x)
+# Versiones del entorno con que se guardaron los modelos: no modificarlas.
+# No instalar notebooks ni herramientas de entrenamiento en la app publicada.
+numpy==2.4.6
+pandas==3.0.3
+scikit-learn==1.9.1
+xgboost==3.3.0
+joblib==1.6.0
+statsmodels==0.15.0
+patsy==1.0.3
+
+# Arrays ArrowStringArray serializados con el modelo estadístico.
+pyarrow>=21,<24
+# Requerida por sklearn/statsmodels; mantener el rango del entorno original.
+scipy>=1.16,<2
+
+# Para los tres modelos Keras de inferencia, sin tareas de entrenamiento.
+tensorflow==2.21.0
+
+# Interfaz Streamlit y gráficos Altair.
+streamlit>=1.45,<2
+altair>=5,<7

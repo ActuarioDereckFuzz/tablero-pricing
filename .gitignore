@@ -1,0 +1,14 @@
+# Entornos locales y cachés
+.venv/
+venv/
+env/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ipynb_checkpoints/
+.streamlit/secrets.toml
+.env
+.env.*
+*.log
+.DS_Store
+Thumbs.db
