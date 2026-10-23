@@ -20,3 +20,8 @@ tensorflow==2.21.0
 # Interfaz Streamlit y gráficos Altair.
 streamlit>=1.45,<2
 altair>=5,<7
+
+# Serialization and runtime compatibility
+dill==0.4.0
+six==1.17.0
+python-dateutil==2.9.0.post0
