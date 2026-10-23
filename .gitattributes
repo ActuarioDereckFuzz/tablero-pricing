@@ -1,0 +1,2 @@
+# Preservar exactamente los artefactos congelados de Deep Learning
+models/deep_learning/v1/records/*.json -text
