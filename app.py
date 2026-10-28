@@ -1,7 +1,7 @@
 """07.02 — Aplicación de tarificación educativa de tres modelos congelados.
 
 Ejecutar desde esta carpeta: streamlit run app.py
-- Dashboard: utiliza seis CSV fijos de la simulación 07.01.
+- Dashboard: utiliza los seis CSV originales y dos CSV de segmentación 07.01.
 - Cotizador: ejecuta los modelos reales, sin oracle ni reentrenamiento.
 """
 from __future__ import annotations
@@ -15,7 +15,7 @@ import streamlit as st
 
 from app_core import (
     DATASETS, DEFAULT_EXPENSE_RATIO, DEFAULT_TARGET_MARGIN, MODEL_COLUMNS,
-    STRATEGIES, PricingEngine, load_simulation,
+    SEGMENT_ORDER, STRATEGIES, PricingEngine, load_simulation,
 )
 
 ROOT = Path(__file__).resolve().parent
@@ -67,7 +67,7 @@ def data_tables() -> dict[str, pd.DataFrame]:
     return load_simulation(ROOT)
 
 
-@st.cache_resource(show_spinner="Cargando modelos congelados (incluido TensorFlow)…")
+@st.cache_resource(show_spinner="Cargando modelos")
 def engine() -> PricingEngine:
     return PricingEngine.from_root(ROOT)
 
@@ -95,13 +95,13 @@ def add_short_name(df: pd.DataFrame) -> pd.DataFrame:
 try:
     tables = data_tables()
 except Exception as exc:
-    st.error(f"No fue posible cargar/validar los CSV de 07.01: {type(exc).__name__}: {exc}")
+    st.error(f"No fue posible cargar/validar los CSV: {type(exc).__name__}: {exc}")
     st.stop()
 
 n_prospects = len(tables["prospects"])
 with st.sidebar:
-    st.markdown("### ◇ PUREPREMIUM LAB")
-    st.caption("DEMO ACTUARIAL  ·  FASE 07.02")
+    st.markdown("### PUREPREMIUM LAB")
+    st.caption("DEMO ACTUARIAL")
     st.divider()
     page = st.radio(
         "Explorar aplicación",
@@ -109,9 +109,9 @@ with st.sidebar:
         index=0,
     )
     st.divider()
-    st.caption("CORRIDA CONGELADA · 07.01")
+    st.caption("CORRIDA CONGELADA")
     st.markdown(f"**{n_prospects:,}** prospectos sintéticos")
-    st.caption("Modo live_new · semilla 20261022")
+    st.caption("semilla 20261022")
     st.caption("3 modelos · 9 escenarios de demanda")
     st.caption("Sin reentrenamiento de modelos")
     st.divider()
@@ -128,7 +128,7 @@ st.markdown("""
 
 if page == "Cotizador individual":
     st.subheader("Cotizador individual")
-    st.markdown('<p class="section-note">Introduce seis características observables. Se cargan exclusivamente los modelos entrenados y guardados en las fases 03–05; las variables <i>oracle</i> no se utilizan para cotizar.</p>', unsafe_allow_html=True)
+    st.markdown('<p class="section-note">Introduce seis características observables. Se cargan exclusivamente los modelos previamente entrenados y guardados; las variables <i>oracle</i> no se utilizan para cotizar.</p>', unsafe_allow_html=True)
 
     zone_labels = {1: "Muy bajo", 2: "Bajo", 3: "Medio", 4: "Alto", 5: "Muy alto"}
     coverage_labels = {0: "Limitada", 1: "RC", 2: "Amplia"}
@@ -215,7 +215,7 @@ if page == "Cotizador individual":
 
 elif page == "Dashboard de cartera":
     st.subheader("Dashboard de cartera")
-    st.markdown('<p class="section-note">Los indicadores corresponden a la misma cartera sintética de 07.01 y a una política de gastos del 25% más margen técnico objetivo del 5%.</p>', unsafe_allow_html=True)
+    st.markdown('<p class="section-note">Los indicadores corresponden a la misma cartera sintética y a una política de gastos del 25% más margen técnico objetivo del 5%.</p>', unsafe_allow_html=True)
     mode_label = st.radio("Método de contratación", ["Aceptaciones simuladas (U < p)", "Valor esperado (ponderación por p)"],
                           index=0, horizontal=True)
     mode = "simulated" if mode_label.startswith("Aceptaciones") else "expected"
@@ -272,6 +272,168 @@ elif page == "Dashboard de cartera":
             tooltip=["segmento:N", "modelo:N", alt.Tooltip("conversion:Q", format=".1%")],
         ).properties(height=330)
         st.altair_chart(plot_theme(chart), use_container_width=True)
+    st.divider()
+    st.markdown("### Análisis por segmentos observables")
+    st.caption(
+        "Corrida base congelada 07.01 · 1,500 prospectos · L = 1.50, k = 5. "
+        "Los indicadores comerciales de esta sección son SIEMPRE valores esperados "
+        "(ponderados por probabilidad de contratación), independientemente del modo "
+        "seleccionado arriba. No responden a los controles de Sensibilidad de demanda."
+    )
+
+    metric_options = {
+        "Sesgo técnico relativo (todos los prospectos)": (
+            "sesgo_relativo_todos", "Sesgo relativo frente al oracle", ".1%",
+            "El sesgo es (suma de prima pura estimada − suma oracle) / suma oracle "
+            "en TODOS los prospectos. Negativo significa subestimación; no implica "
+            "automáticamente resultado técnico negativo.", 0.0,
+        ),
+        "MAE de prima pura (todos los prospectos)": (
+            "mae_oracle_todos", "MAE de prima pura (u.m. por prospecto)", ",.0f",
+            "Error absoluto medio de prima pura contra oracle, calculado sobre TODOS "
+            "los prospectos del segmento, no solo los que aceptarían.", None,
+        ),
+        "Conversión comercial esperada": (
+            "conversion_esperada", "Contratación esperada / prospectos", ".1%",
+            "Conversión = suma de probabilidades de contratación / n prospectos. "
+            "También depende del precio y de la demanda hipotética: menor conversión "
+            "NO prueba sobreestimación del riesgo.", None,
+        ),
+        "Prima comercial media ofertada": (
+            "precio_medio_ofertado", "Precio medio ofertado (u.m. por prospecto)", ",.0f",
+            "Promedio simple del precio comercial ofrecido a TODOS los prospectos, "
+            "con gastos 25% y margen objetivo 5%; no es la prima media de los contratantes.", None,
+        ),
+        "Resultado técnico esperado": (
+            "resultado_tecnico_esperado", "Resultado técnico esperado total (u.m.)", ",.0f",
+            "Suma de prima emitida esperada − gastos esperados − siniestros esperados "
+            "en cada segmento. Es un TOTAL, influido por el tamaño y la selección "
+            "de la cartera; no corresponde a un resultado contable observado.", 0.0,
+        ),
+        "Siniestralidad esperada (loss ratio)": (
+            "loss_ratio_esperado", "Loss ratio esperado", ".1%",
+            "Siniestros esperados / prima emitida esperada de los contratantes "
+            "ponderados. Excluye gastos; debe leerse junto con el combined ratio.", 1.0,
+        ),
+        "Combined ratio esperado": (
+            "combined_ratio_esperado", "Combined ratio esperado", ".1%",
+            "(Siniestros esperados + gastos esperados) / prima emitida esperada. "
+            "Más de 100% implica pérdida técnica esperada, bajo estos supuestos.", 1.0,
+        ),
+    }
+    dim_col, measure_col = st.columns([1, 2])
+    with dim_col:
+        dimension = st.selectbox(
+            "Variable observable", options=list(SEGMENT_ORDER), key="observable_dimension",
+        )
+    with measure_col:
+        metric_label = st.selectbox(
+            "Indicador a comparar", options=list(metric_options), key="observable_metric",
+        )
+    field, axis_title, value_format, explanation, reference = metric_options[metric_label]
+    segment_view = add_short_name(
+        tables["observable_segments"].loc[
+            tables["observable_segments"]["dimension"] == dimension
+        ]
+    )
+    st.caption(
+        f"{dimension}: {len(SEGMENT_ORDER[dimension])} grupos predefinidos, "
+        f"{n_prospects:,} prospectos por modelo (mismos perfiles en tres estrategias "
+        "contrafactuales). Las dimensiones no se suman entre sí."
+    )
+
+    bars = alt.Chart(segment_view).mark_bar(cornerRadiusEnd=3).encode(
+        x=alt.X("segmento:N", title=dimension, sort=SEGMENT_ORDER[dimension]),
+        xOffset=alt.XOffset("modelo:N", sort=list(NAMES.values())),
+        y=alt.Y(f"{field}:Q", title=axis_title,
+                axis=alt.Axis(format=value_format)),
+        color=alt.Color(
+            "modelo:N", title="Modelo",
+            scale=alt.Scale(domain=list(NAMES.values()), range=COLORS),
+        ),
+        tooltip=[
+            alt.Tooltip("segmento:N", title="Segmento"),
+            alt.Tooltip("modelo:N", title="Modelo"),
+            alt.Tooltip("n_prospectos:Q", title="Prospectos", format=",.0f"),
+            alt.Tooltip(f"{field}:Q", title=axis_title, format=value_format),
+            alt.Tooltip("conversion_esperada:Q", title="Conversión esperada", format=".1%"),
+            alt.Tooltip("combined_ratio_esperado:Q", title="Combined ratio", format=".1%"),
+        ],
+    )
+    if reference is not None:
+        guideline = alt.Chart(pd.DataFrame({"ref": [reference]})).mark_rule(
+            color="#D0DCE9", strokeDash=[5, 5], strokeWidth=1.2,
+        ).encode(y="ref:Q")
+        segment_chart = alt.layer(bars, guideline)
+    else:
+        segment_chart = bars
+    st.altair_chart(plot_theme(segment_chart.properties(height=340)), use_container_width=True)
+    st.caption(explanation + (" Línea discontinua = referencia (0 o 100%)."
+                              if reference is not None else ""))
+
+    # Tabla corta: tamaño y una lectura simultánea de riesgo y suficiencia.
+    visible_columns = list(dict.fromkeys([
+        "segmento", "modelo", "n_prospectos", field,
+        "conversion_esperada", "precio_medio_ofertado",
+        "resultado_tecnico_esperado", "combined_ratio_esperado",
+    ]))
+    column_labels = {
+        "segmento": "Segmento", "modelo": "Modelo", "n_prospectos": "Prospectos",
+        "sesgo_relativo_todos": "Sesgo vs oracle",
+        "mae_oracle_todos": "MAE (u.m.)",
+        "conversion_esperada": "Conversión esperada",
+        "precio_medio_ofertado": "Precio medio (u.m.)",
+        "resultado_tecnico_esperado": "Resultado técnico (u.m.)",
+        "loss_ratio_esperado": "Siniestralidad esperada",
+        "combined_ratio_esperado": "Combined ratio",
+    }
+    table_formats = {
+        "Prospectos": "{:,.0f}", "Sesgo vs oracle": "{:.1%}",
+        "MAE (u.m.)": "{:,.0f}", "Conversión esperada": "{:.1%}",
+        "Precio medio (u.m.)": "{:,.0f}", "Resultado técnico (u.m.)": "{:,.0f}",
+        "Siniestralidad esperada": "{:.1%}", "Combined ratio": "{:.1%}",
+    }
+    display_segments = segment_view[visible_columns].rename(columns=column_labels)
+    st.dataframe(
+        display_segments.style.format({k: v for k, v in table_formats.items()
+                                       if k in display_segments.columns}),
+        use_container_width=True, hide_index=True,
+    )
+    with st.expander("Ver métricas adicionales y alcance metodológico", expanded=False):
+        st.markdown(
+            "**Técnica vs. comercial:** los sesgos y el MAE comparan prima pura "
+            "estimada con oracle en todos los prospectos; los precios son ofertas "
+            "comerciales y la rentabilidad se pondera por las probabilidades de compra. "
+            "La prima media de compradores esperados difiere de la oferta media."
+        )
+        st.markdown(
+            "**Interpretación:** dimensiones marginales y superpuestas; resultados "
+            "descriptivos, no causales ni ajustados. La demanda simulada utiliza oracle "
+            "para generar WTP, pero el oracle nunca ingresa al cotizador. Los grupos "
+            "pequeños deben interpretarse con cautela."
+        )
+        extra_cols = [
+            "segmento", "modelo", "n_prospectos", "prima_pura_oracle_media",
+            "prima_pura_estimada_media", "sesgo_relativo_todos", "mae_oracle_todos",
+            "sesgo_relativo_aceptados_esperados", "conversion_simulada",
+            "conversion_esperada", "precio_medio_ofertado",
+            "precio_medio_aceptados_esperados", "contrataciones_esperadas",
+            "resultado_tecnico_esperado", "loss_ratio_esperado", "combined_ratio_esperado",
+        ]
+        st.dataframe(segment_view[extra_cols], use_container_width=True, hide_index=True)
+    st.download_button(
+        "Exportar métricas de la segmentación seleccionada",
+        data=segment_view.drop(columns=["modelo"]).to_csv(index=False).encode("utf-8-sig"),
+        file_name=f"07_02_segmentacion_{list(SEGMENT_ORDER).index(dimension) + 1}.csv",
+        mime="text/csv", key="segment_download",
+    )
+    st.warning(
+        "Este análisis corresponde exclusivamente al escenario base congelado. "
+        "La elección de modo del dashboard y los controles L/k no modifican "
+        "los CSV de segmentación. La menor conversión no equivale automáticamente "
+        "a sobreestimación del riesgo."
+    )
+
     st.download_button("Descargar tabla de KPI", data=tables[mode].to_csv(index=False).encode("utf-8-sig"),
                        file_name=f"07_02_kpi_{mode}.csv", mime="text/csv")
 
@@ -383,7 +545,7 @@ else:
 
     **Estimadores congelados:** GLM Tweedie directo (estadístico), XGBoost directo (ML) y
     MLP Tweedie directo (DL). Los representantes se eligieron en la fase 06 bajo métricas
-    distintas, antes de evaluar sus resultados comerciales en 07.01.
+    distintas, antes de evaluar sus resultados comerciales.
 
     **Entradas de inferencia:** edad, zona, antigüedad del vehículo, cobertura,
     historial de siniestros y tipo de uso. Los campos del *oracle* no ingresan al cotizador.
@@ -415,5 +577,5 @@ else:
     """)
     st.info("En 07.01 el GLM lideró los nueve escenarios de sensibilidad de demanda; esa conclusión aplica solamente a los supuestos y prospectos de este ejercicio.")
 
-st.markdown("<div class='footnote'>PurePremium Lab · Fase 07.02 · Demostración académica con datos sintéticos · Cifras en unidades monetarias simuladas (u.m.)</div>",
+st.markdown("<div class='footnote'>PurePremium Lab · Demostración académica con datos sintéticos · Cifras en unidades monetarias simuladas (u.m.)</div>",
             unsafe_allow_html=True)

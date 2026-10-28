@@ -1,6 +1,6 @@
-"""Motor ligero de validación y tarificación para 07.02.
+"""Motor ligero de validación y tarificación 
 
-No entrena modelos ni simula nuevos targets. Los seis CSV provienen de 07.01.
+No entrena modelos ni simula nuevos targets. 
 Las funciones de inferencia se reutilizan sin modificarlas (src/models/).
 """
 from __future__ import annotations
@@ -30,7 +30,18 @@ DATASETS = {
     "segments": "07_01_risk_segments.csv",
     "sensitivity": "07_01_demand_sensitivity.csv",
     "winners": "07_01_demand_winners.csv",
+    "observable_segments": "07_01_segment_metrics.csv",
+    "observable_findings": "07_01_segment_findings.csv",
 }
+# Categorías fijadas en la sección 12 de 07.01 (segmentaciones marginales).
+SEGMENT_ORDER = {
+    "Cobertura": ["Limitada", "RC", "Amplia"],
+    "Zona": ["1", "2", "3", "4", "5"],
+    "Historial": ["0", "1", "2", "3–4"],
+    "Edad": ["18–29", "30–44", "45–59", "60–74"],
+    "Antigüedad": ["0–4", "5–9", "10–14", "15–19"],
+}
+
 VALID_RANGES = {
     "edad": (18, 74),
     "zona": (1, 5),
@@ -125,6 +136,136 @@ def validate_simulation(data: dict[str, pd.DataFrame]) -> None:
             raise ValueError("Ganador de sensibilidad no coincide")
         _assert_close(row["resultado_tecnico"], best["resultado_tecnico"], "ganador sensibilidad")
 
+
+
+    validate_observable_segments(data)
+
+
+def validate_observable_segments(data: dict[str, pd.DataFrame]) -> None:
+    """Valida CSV congelados de la sección 12 sin recalcular modelos ni demanda.
+
+    Las cinco dimensiones son particiones separadas y superpuestas de la misma
+    cartera. Solo se concilia cada dimensión individualmente con los KPI base.
+    """
+    metrics = data["observable_segments"]
+    findings = data["observable_findings"]
+    prospects = data["prospects"]
+    required = {
+        "dimension", "segmento", "estrategia", "n_prospectos",
+        "prima_pura_oracle_media", "prima_pura_estimada_media",
+        "sesgo_medio_todos", "sesgo_relativo_todos", "mae_oracle_todos",
+        "sesgo_medio_aceptados_esperados", "sesgo_relativo_aceptados_esperados",
+        "precio_medio_ofertado", "precio_medio_aceptados_esperados",
+        "n_contratados_simulados", "conversion_simulada",
+        "contrataciones_esperadas", "conversion_esperada",
+        "prima_emitida_simulada", "resultado_tecnico_simulado",
+        "prima_emitida_esperada", "siniestros_esperados", "gastos_esperados",
+        "resultado_tecnico_esperado", "loss_ratio_esperado",
+        "combined_ratio_esperado", "margen_tecnico_esperado",
+    }
+    missing = required - set(metrics.columns)
+    if missing:
+        raise ValueError(f"Columnas de segmentación faltantes: {sorted(missing)}")
+    if metrics[list(required)].isna().any().any():
+        raise ValueError("La tabla segmentada contiene valores nulos")
+    expected_keys = {(dim, label, strategy)
+                     for dim, labels in SEGMENT_ORDER.items()
+                     for label in labels for strategy in STRATEGIES}
+    actual_keys = set(metrics[["dimension", "segmento", "estrategia"]].itertuples(index=False, name=None))
+    if len(metrics) != 60 or len(actual_keys) != len(metrics) or actual_keys != expected_keys:
+        raise ValueError("Los 60 cruces dimensión/segmento/estrategia no coinciden con 07.01")
+
+    # Las etiquetas son exclusivamente verificaciones del CSV contra prospectos.
+    # No se añaden columnas a prospectos ni se generan nuevas predicciones.
+    labels = {
+        "Cobertura": prospects["cobertura"].map({0: "Limitada", 1: "RC", 2: "Amplia"}),
+        "Zona": prospects["zona"].astype(str),
+        "Historial": prospects["historial_siniestros"].map({
+            0: "0", 1: "1", 2: "2", 3: "3–4", 4: "3–4"
+        }),
+        "Edad": pd.cut(prospects["edad"], bins=[17, 29, 44, 59, 74],
+                       labels=SEGMENT_ORDER["Edad"], include_lowest=True),
+        "Antigüedad": pd.cut(prospects["anios_vehiculo"], bins=[-1, 4, 9, 14, 19],
+                             labels=SEGMENT_ORDER["Antigüedad"], include_lowest=True),
+    }
+    n = len(prospects)
+    expected_global = data["expected"].set_index("estrategia")
+    simulated_global = data["simulated"].set_index("estrategia")
+    for dim, ordered_labels in SEGMENT_ORDER.items():
+        observed = labels[dim]
+        if observed.isna().any():
+            raise ValueError(f"{dim}: valores fuera de los rangos de segmentación")
+        counts = observed.value_counts().reindex(ordered_labels, fill_value=0)
+        part = metrics.loc[metrics["dimension"] == dim]
+        for strategy in STRATEGIES:
+            group = part.loc[part["estrategia"] == strategy].set_index("segmento").loc[ordered_labels]
+            if not np.array_equal(group["n_prospectos"].to_numpy(), counts.to_numpy()):
+                raise ValueError(f"{dim}/{strategy}: los tamaños no corresponden a los prospectos")
+            if int(group["n_prospectos"].sum()) != n:
+                raise ValueError(f"{dim}/{strategy}: partición incompleta")
+            for segment_metric, global_metric in (
+                ("contrataciones_esperadas", "n_polizas"),
+                ("prima_emitida_esperada", "prima_emitida"),
+                ("siniestros_esperados", "siniestros_esperados"),
+                ("gastos_esperados", "gastos_esperados"),
+                ("resultado_tecnico_esperado", "resultado_tecnico"),
+            ):
+                _assert_close(group[segment_metric].sum(), expected_global.loc[strategy, global_metric],
+                              f"segmentos/{dim}/{strategy}/{segment_metric}")
+            for segment_metric, global_metric in (
+                ("n_contratados_simulados", "n_polizas"),
+                ("prima_emitida_simulada", "prima_emitida"),
+                ("resultado_tecnico_simulado", "resultado_tecnico"),
+            ):
+                _assert_close(group[segment_metric].sum(), simulated_global.loc[strategy, global_metric],
+                              f"segmentos/{dim}/{strategy}/{segment_metric}")
+            for segment_metric, global_metric in (
+                ("sesgo_medio_todos", "sesgo_oracle_todos"),
+                ("mae_oracle_todos", "mae_oracle_todos"),
+            ):
+                aggregate = np.dot(group["n_prospectos"], group[segment_metric]) / n
+                _assert_close(aggregate, expected_global.loc[strategy, global_metric],
+                              f"segmentos/{dim}/{strategy}/{segment_metric}")
+            # Comprobaciones de coherencia por fila, sin recomputar inferencias.
+            for label, row in group.iterrows():
+                prefix = f"segmentos/{dim}/{label}/{strategy}"
+                _assert_close(row["conversion_esperada"],
+                              row["contrataciones_esperadas"] / row["n_prospectos"],
+                              prefix + "/conversion")
+                _assert_close(row["precio_medio_ofertado"],
+                              row["prima_pura_estimada_media"] / ORIGINAL_DENOMINATOR,
+                              prefix + "/precio")
+                _assert_close(row["sesgo_relativo_todos"],
+                              row["sesgo_medio_todos"] / row["prima_pura_oracle_media"],
+                              prefix + "/sesgo_relativo")
+                _assert_close(row["resultado_tecnico_esperado"],
+                              row["prima_emitida_esperada"] - row["gastos_esperados"]
+                              - row["siniestros_esperados"], prefix + "/resultado")
+                _assert_close(row["combined_ratio_esperado"],
+                              (row["siniestros_esperados"] + row["gastos_esperados"])
+                              / row["prima_emitida_esperada"], prefix + "/combined_ratio")
+
+    findings_cols = {"dimension", "estrategia", "segmento_mayor_subestimacion",
+                     "n_prospectos", "sesgo_relativo_aceptados", "combined_ratio"}
+    if findings_cols - set(findings.columns):
+        raise ValueError("Faltan columnas de síntesis por segmentos")
+    if findings[list(findings_cols)].isna().any().any() or len(findings) != 15 or findings.duplicated(
+        ["dimension", "estrategia"]
+    ).any():
+        raise ValueError("La síntesis de segmentación debe contener 15 cruces únicos y completos")
+    for _, finding in findings.iterrows():
+        sample = metrics.loc[(metrics["dimension"] == finding["dimension"])
+                             & (metrics["estrategia"] == finding["estrategia"])]
+        if sample.empty:
+            raise ValueError("Síntesis de segmento desconocido")
+        worst = sample.loc[sample["sesgo_relativo_aceptados_esperados"].idxmin()]
+        if worst["segmento"] != finding["segmento_mayor_subestimacion"]:
+            raise ValueError("Síntesis de mayor subestimación incompatible")
+        _assert_close(worst["n_prospectos"], finding["n_prospectos"], "síntesis/n")
+        _assert_close(worst["sesgo_relativo_aceptados_esperados"],
+                      finding["sesgo_relativo_aceptados"], "síntesis/sesgo")
+        _assert_close(worst["combined_ratio_esperado"], finding["combined_ratio"],
+                      "síntesis/combined_ratio")
 
 def validate_profile(profile: dict[str, Any]) -> pd.DataFrame:
     missing = set(FEATURES) - set(profile)
